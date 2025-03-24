@@ -1,0 +1,9 @@
+torch
+torchvision
+torchaudio
+numpy
+matplotlib
+opencv-python
+pillow --only-binary :all:
+tqdm
+scipy
