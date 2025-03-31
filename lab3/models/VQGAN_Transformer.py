@@ -87,16 +87,6 @@ class MaskGit(nn.Module):
 
 ##TODO2 step1-3:            
     def forward(self, image):
-        # _, z_indices = self.encode_to_z(image)
-        
-        # mask_token = torch.ones(z_indices.shape, device=z_indices.device).long() * self.mask_token_id 
-        # mask = torch.bernoulli(0.5 * torch.ones(z_indices.shape, device=z_indices.device)).bool()
-        
-        # new_indices = mask * mask_token + (~mask) * z_indices
-        # logits = self.transformer(new_indices)
-        # z_indices=z_indices # ground truth
-        # logits = logits  # transformer predict the probability of tokens
-        # return logits, z_indices
         _, z_indices = self.encode_to_z(image)
         batch_size, num_tokens = z_indices.size()
 
@@ -110,42 +100,8 @@ class MaskGit(nn.Module):
         mask_z_indices = mask * z_indices + (1 - mask) * mask_token_id
         logits = self.transformer(mask_z_indices)
         return logits, z_indices
-        logits = self.transformer(z_indices)
-        # print(logits[0])
-        # print("logits shape: ", logits.shape)
-        return logits
     
 ##TODO3 step1-1: define one iteration decoding   
-    # @torch.no_grad()
-    # def inpainting(self, z_indices, mask, mask_num, ratio):
-    #     z_indices_with_mask = mask * self.mask_token_id + (~mask) * z_indices
-    #     logits = self.transformer(z_indices_with_mask)
-    #     probs = torch.softmax(logits, dim=-1)
-        
-    #     # make sure the predict token is not mask token
-    #     z_indices_predict = torch.distributions.categorical.Categorical(logits=logits).sample()
-    #     while torch.any(z_indices_predict == self.mask_token_id):
-    #         z_indices_predict = torch.distributions.categorical.Categorical(logits=logits).sample()
-            
-    #     z_indices_predict = mask * z_indices_predict + (~mask) * z_indices
-
-    #     # get prob from predict z_indices
-    #     z_indices_predict_prob = probs.gather(-1, z_indices_predict.unsqueeze(-1)).squeeze(-1)
-    #     z_indices_predict_prob = torch.where(mask, z_indices_predict_prob, torch.zeros_like(z_indices_predict_prob) + torch.inf)
-
-        
-    #     mask_len = torch.floor(mask_num * ratio).long()
-
-    #     g = torch.distributions.gumbel.Gumbel(0, 1).sample(z_indices_predict_prob.shape).to(z_indices_predict_prob.device)
-    #     temperature = self.choice_temperature * (1 - ratio)
-    #     confidence = z_indices_predict_prob + temperature * g
-    #     sorted_confidence = torch.sort(confidence, dim=-1)[0]
-    #     cut_off = sorted_confidence[:, mask_len].unsqueeze(-1)
-    #     new_mask = (confidence < cut_off)
-    #     print("old mask number: ", mask.sum())
-    #     print("new mask number: ", new_mask.sum())
-    #     return z_indices_predict, new_mask
-
     @torch.no_grad()
     def inpainting(self, z_indices, mask, mask_num, ratio):
         ismask =  mask == True
@@ -171,9 +127,7 @@ class MaskGit(nn.Module):
         #sort the confidence for the rank 
         #define how much the iteration remain predicted tokens by mask scheduling
         ##At the end of the decoding process, add back the original(non-masked) token values
-        
-        mask_bc=None
-        return z_indices_predict, mask_bc
+
     @torch.no_grad()
     def generate(self, z_indices, gt_image, loss):
         assert torch.min(z_indices) >= 0 and torch.max(z_indices) < self.mask_token_id, f"z_indices out of range: min {z_indices.min()}, max {z_indices.max()}"
