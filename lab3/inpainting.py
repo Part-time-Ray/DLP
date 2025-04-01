@@ -127,8 +127,8 @@ if __name__ == '__main__':
     parser.add_argument('--load-transformer-ckpt-path', type=str, default='./transformer_checkpoints/last_ckpt.pt', help='load ckpt')
     
     #dataset path
-    parser.add_argument('--test-maskedimage-path', type=str, default='./lab5_dataset/masked_image', help='Path to testing image dataset.')
-    parser.add_argument('--test-mask-path', type=str, default='./lab5_dataset/mask64', help='Path to testing mask dataset.')
+    parser.add_argument('--test-maskedimage-path', type=str, default='./lab3_dataset/masked_image', help='Path to testing image dataset.')
+    parser.add_argument('--test-mask-path', type=str, default='./lab3_dataset/mask64', help='Path to testing mask dataset.')
     #MVTM parameter
     parser.add_argument('--sweet-spot', type=int, default=20, help='sweet spot: the best step in total iteration')
     parser.add_argument('--total-iter', type=int, default=20, help='total step for mask scheduling')
