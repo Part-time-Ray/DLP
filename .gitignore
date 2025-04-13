@@ -1,7 +1,10 @@
 *.png
 *.jpg
+*.gif
 __pycache__/
 env/
 *.pt
 *.pth
 *.pkl
+*.ckpt
+*.csv
