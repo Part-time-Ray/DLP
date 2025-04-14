@@ -450,7 +450,7 @@ if __name__ == '__main__':
     parser.add_argument('--save_root',     type=str, default='./save_path', help="The path to save your data") # required
     parser.add_argument('--num_workers',   type=int, default=12)
     parser.add_argument('--num_epoch',     type=int, default=300,     help="number of total epoch")
-    parser.add_argument('--num_epoch_warmup',    type=int, default=5,       help="number of total epoch warmup")
+    parser.add_argument('--num_epoch_warmup',    type=int, default=0,       help="number of total epoch warmup")
     parser.add_argument('--per_save',      type=int, default=3,      help="Save checkpoint every seted epoch")
     parser.add_argument('--partial',       type=float, default=1.0,  help="Part of the training dataset to be trained")
     parser.add_argument('--train_vi_len',  type=int, default=16,     help="Training video length")
@@ -466,7 +466,7 @@ if __name__ == '__main__':
     parser.add_argument('--D_out_dim',     type=int, default=192,    help="Dimension of the output in Decoder_Fusion")
     
     # Teacher Forcing strategy
-    parser.add_argument('--tfr',           type=float, default=0.5,  help="The initial teacher forcing ratio")
+    parser.add_argument('--tfr',           type=float, default=0,  help="The initial teacher forcing ratio")
     parser.add_argument('--tfr_sde',       type=int,   default=8,   help="The epoch that teacher forcing ratio start to decay")
     parser.add_argument('--tfr_d_step',    type=float, default=0.1,  help="Decay step that teacher forcing ratio adopted")
     parser.add_argument('--ckpt_path',     type=str, default="./save_path", help="The path of your checkpoints")   

@@ -86,8 +86,8 @@ class Gaussian_Predictor(nn.Sequential):
         feature = torch.cat([img, label], dim=1)
         parm = super().forward(feature)
         mu, logvar = torch.chunk(parm, 2, dim=1)
-        mu = torch.clamp(mu, -3, 3)
-        logvar = torch.clamp(logvar, 1 - 3, 1 + 3)
+        mu = torch.clamp(mu, -8, 8)
+        logvar = torch.clamp(logvar, 1 - 8, 1 + 8)
         z = self.reparameterize(mu, logvar)
 
         return z, mu, logvar
