@@ -141,7 +141,7 @@ class VAE_Model(nn.Module):
         self.Generator            = Generator(input_nc=args.D_out_dim, output_nc=3)
         
         self.optim      = optim.Adam(self.parameters(), lr=self.args.lr)
-        self.scheduler  = optim.lr_scheduler.MultiStepLR(self.optim, milestones=[2, 5], gamma=0.1)
+        self.scheduler  = optim.lr_scheduler.MultiStepLR(self.optim, milestones=[2, 15, 80], gamma=0.2)
         self.kl_annealing = kl_annealing(args, current_epoch=0)
         self.mse_criterion = nn.MSELoss()
         self.current_epoch = 1
@@ -466,9 +466,9 @@ if __name__ == '__main__':
     parser.add_argument('--D_out_dim',     type=int, default=192,    help="Dimension of the output in Decoder_Fusion")
     
     # Teacher Forcing strategy
-    parser.add_argument('--tfr',           type=float, default=0,  help="The initial teacher forcing ratio")
+    parser.add_argument('--tfr',           type=float, default=0.1,  help="The initial teacher forcing ratio")
     parser.add_argument('--tfr_sde',       type=int,   default=8,   help="The epoch that teacher forcing ratio start to decay")
-    parser.add_argument('--tfr_d_step',    type=float, default=0.1,  help="Decay step that teacher forcing ratio adopted")
+    parser.add_argument('--tfr_d_step',    type=float, default=0,  help="Decay step that teacher forcing ratio adopted")
     parser.add_argument('--ckpt_path',     type=str, default="./save_path", help="The path of your checkpoints")   
     
     # Training Strategy
@@ -478,8 +478,8 @@ if __name__ == '__main__':
     
     # Kl annealing stratedy arguments
     parser.add_argument('--kl_anneal_type',     type=str, default='Cyclical', choices=['Cyclical', 'Monotonic', 'None'],       help="")
-    parser.add_argument('--kl_anneal_cycle',    type=int, default=30,               help="")
-    parser.add_argument('--kl_anneal_ratio',    type=float, default=0.05,              help="") 
+    parser.add_argument('--kl_anneal_cycle',    type=int, default=20,               help="")
+    parser.add_argument('--kl_anneal_ratio',    type=float, default=0.1,              help="") 
 
     args = parser.parse_args()
     
