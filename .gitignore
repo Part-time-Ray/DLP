@@ -2,6 +2,7 @@
 *.jpg
 *.gif
 __pycache__/
+wandb/
 env/
 *.pt
 *.pth
