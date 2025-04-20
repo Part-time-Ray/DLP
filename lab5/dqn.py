@@ -33,7 +33,7 @@ class DQN(nn.Module):
         - Feel free to change the architecture (e.g. number of hidden layers and the width of each hidden layer) as you like
         - Feel free to add any member variables/functions whenever needed
     """
-    def __init__(self, num_actions, input_dim=4):
+    def __init__(self, num_actions):
         super(DQN, self).__init__()
         # An example: 
         #self.network = nn.Sequential(
@@ -45,27 +45,85 @@ class DQN(nn.Module):
         #)       
         ########## YOUR CODE HERE (5~10 lines) ##########
         self.network = nn.Sequential(
-            nn.Linear(input_dim, 32),
+            nn.Conv2d(4, 32, kernel_size=8, stride=4),  # Input: 4x84x84, Output: 32x20x20
             nn.ReLU(),
-            nn.Linear(32, 64),
+            nn.Conv2d(32, 64, kernel_size=4, stride=2),  # Output: 64x9x9
             nn.ReLU(),
-            nn.Linear(64, 32),
+            nn.Conv2d(64, 64, kernel_size=3, stride=1),  # Output: 64x7x7
             nn.ReLU(),
-            nn.Linear(32, 16),
+            nn.Flatten(),
+            nn.Linear(64 * 7 * 7, 512),
             nn.ReLU(),
-            nn.Linear(16, num_actions)
+            nn.Dropout(0.2),
+            nn.Linear(512, num_actions)
         )       
+        self.network.apply(init_weights)
         ########## END OF YOUR CODE ##########
 
     def forward(self, x):
-        # x shape: (batch_size, 4)
-        return self.network(x)     
+        return self.network(x)
+
+
+class AtariPreprocessor:
+    """
+        Preprocesing the state input of DQN for Atari
+    """    
+    def __init__(self, frame_stack=4):
+        self.frame_stack = frame_stack
+        self.frames = deque(maxlen=frame_stack)
+
+    def preprocess(self, obs):
+        gray = cv2.cvtColor(obs, cv2.COLOR_RGB2GRAY)
+        resized = cv2.resize(gray, (84, 84), interpolation=cv2.INTER_AREA)
+        return resized / 255
+
+    def reset(self, obs):
+        frame = self.preprocess(obs)
+        self.frames = deque([frame for _ in range(self.frame_stack)], maxlen=self.frame_stack)
+        return np.stack(self.frames, axis=0)
+
+    def step(self, obs):
+        frame = self.preprocess(obs)
+        self.frames.append(frame)
+        return np.stack(self.frames, axis=0)
+
+
+class PrioritizedReplayBuffer:
+    """
+        Prioritizing the samples in the replay memory by the Bellman error
+        See the paper (Schaul et al., 2016) at https://arxiv.org/abs/1511.05952
+    """ 
+    def __init__(self, capacity, alpha=0.6, beta=0.4):
+        self.capacity = capacity
+        self.alpha = alpha
+        self.beta = beta
+        self.buffer = []
+        self.priorities = np.zeros((capacity,), dtype=np.float32)
+        self.pos = 0
+
+    def add(self, transition, error):
+        ########## YOUR CODE HERE (for Task 3) ########## 
+                    
+        ########## END OF YOUR CODE (for Task 3) ########## 
+        return 
+    def sample(self, batch_size):
+        ########## YOUR CODE HERE (for Task 3) ########## 
+                    
+        ########## END OF YOUR CODE (for Task 3) ########## 
+        return
+    def update_priorities(self, indices, errors):
+        ########## YOUR CODE HERE (for Task 3) ########## 
+                    
+        ########## END OF YOUR CODE (for Task 3) ########## 
+        return
+        
 
 class DQNAgent:
-    def __init__(self, env_name="CartPole-v1", args=None):
+    def __init__(self, env_name="ALE/Pong-v5", args=None):
         self.env = gym.make(env_name, render_mode="rgb_array")
         self.test_env = gym.make(env_name, render_mode="rgb_array")
         self.num_actions = self.env.action_space.n
+        self.preprocessor = AtariPreprocessor()
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print("Using device:", self.device)
@@ -76,18 +134,17 @@ class DQNAgent:
         self.target_net = DQN(self.num_actions).to(self.device)
         self.target_net.load_state_dict(self.q_net.state_dict())
         self.optimizer = optim.Adam(self.q_net.parameters(), lr=args.lr)
-        self.memory = deque(maxlen=args.memory_size)
 
         self.batch_size = args.batch_size
         self.gamma = args.discount_factor
         self.epsilon = args.epsilon_start
         self.epsilon_decay = args.epsilon_decay
         self.epsilon_min = args.epsilon_min
-        self.tau = args.tau
+        self.memory = deque(maxlen=args.memory_size)
 
         self.env_count = 0
         self.train_count = 0
-        self.best_reward = 0  # Initilized to 0 for CartPole and to -21 for Pong
+        self.best_reward = -21  # Initilized to 0 for CartPole and to -21 for Pong
         self.max_episode_steps = args.max_episode_steps
         self.replay_start_size = args.replay_start_size
         self.target_update_frequency = args.target_update_frequency
@@ -95,33 +152,35 @@ class DQNAgent:
         self.save_dir = args.save_dir
         os.makedirs(self.save_dir, exist_ok=True)
 
-    def select_action(self, obs):
+    def select_action(self, state):
         if random.random() < self.epsilon:
             return random.randint(0, self.num_actions - 1)
+        state_tensor = torch.from_numpy(np.array(state)).float().unsqueeze(0).to(self.device)
         with torch.no_grad():
-            q_values = self.q_net(obs)
+            q_values = self.q_net(state_tensor)
         return q_values.argmax().item()
 
-    def run(self, episodes=1000):
+    def run(self, episodes=5000):
         rewards = list()
         for ep in range(episodes):
-            obs, _ = self.env.reset() # obs shape: (4,);  action size: 2
+            obs, _ = self.env.reset()
+            state = self.preprocessor.reset(obs)
             done = False
             total_reward = 0
             step_count = 0
 
             while not done and step_count < self.max_episode_steps:
-                obs_np = obs
-                obs = torch.from_numpy(obs_np).to(self.device).unsqueeze(0)
-                action = self.select_action(obs)
+                action = self.select_action(state)
                 next_obs, reward, terminated, truncated, _ = self.env.step(action)
                 done = terminated or truncated
-                self.memory.append((obs_np, action, reward, next_obs, done))
+                
+                next_state = self.preprocessor.step(next_obs)
+                self.memory.append((state, action, reward, next_state, done))
 
                 for _ in range(self.train_per_step):
                     self.train()
 
-                obs = next_obs
+                state = next_state
                 total_reward += reward
                 self.env_count += 1
                 step_count += 1
@@ -137,6 +196,7 @@ class DQNAgent:
                     })
                     ########## YOUR CODE HERE  ##########
                     # Add additional wandb logs for debugging if needed 
+                    
                     ########## END OF YOUR CODE ##########   
             print(f"[Eval] Ep: {ep} Total Reward: {total_reward} SC: {self.env_count} UC: {self.train_count} Eps: {self.epsilon:.4f}")
             rewards.append(total_reward)
@@ -145,12 +205,12 @@ class DQNAgent:
                 "Total Reward": total_reward,
                 "Env Step Count": self.env_count,
                 "Update Count": self.train_count,
-                "Epsilon": self.epsilon,
+                "Epsilon": self.epsilon
             })
             ########## YOUR CODE HERE  ##########
             # Add additional wandb logs for debugging if needed 
             wandb.log({"Mean Reward": np.mean(rewards[-20:])})
-            if np.mean(rewards[-20:]) > 480:
+            if np.mean(rewards[-20:]) > 19:
                 print("Solved!")
                 break
             ########## END OF YOUR CODE ##########  
@@ -170,27 +230,29 @@ class DQNAgent:
                 wandb.log({
                     "Env Step Count": self.env_count,
                     "Update Count": self.train_count,
-                    "Eval Reward": eval_reward,
+                    "Eval Reward": eval_reward
                 })
 
     def evaluate(self):
         obs, _ = self.test_env.reset()
+        state = self.preprocessor.reset(obs)
         done = False
         total_reward = 0
 
         while not done:
-            obs = torch.from_numpy(obs).to(self.device).unsqueeze(0)
+            state_tensor = torch.from_numpy(np.array(state)).float().unsqueeze(0).to(self.device)
             with torch.no_grad():
-                action = self.q_net(obs).argmax().item()
+                action = self.q_net(state_tensor).argmax().item()
             next_obs, reward, terminated, truncated, _ = self.test_env.step(action)
             done = terminated or truncated
             total_reward += reward
-            obs = next_obs
+            state = self.preprocessor.step(next_obs)
+
         return total_reward
 
 
     def train(self):
-        # print(len(self.memory), self.replay_start_size)
+
         if len(self.memory) < self.replay_start_size:
             return 
         
@@ -201,15 +263,8 @@ class DQNAgent:
        
         ########## YOUR CODE HERE (<5 lines) ##########
         # Sample a mini-batch of (s,a,r,s',done) from the replay buffer
-        self.q_net.train()
-        self.target_net.eval()
         batch = random.sample(self.memory, self.batch_size)
-        states, actions, rewards, next_states, dones = zip(*batch)   
-        states = np.array(states)
-        next_states = np.array(next_states)
-        actions = np.array(actions)
-        rewards = np.array(rewards)
-        dones = np.array(dones)
+        states, actions, rewards, next_states, dones = zip(*batch)
         ########## END OF YOUR CODE ##########
 
         # Convert the states, actions, rewards, next_states, and dones into torch tensors
@@ -224,46 +279,40 @@ class DQNAgent:
         ########## YOUR CODE HERE (~10 lines) ##########
         # Implement the loss function of DQN and the gradient updates 
         with torch.no_grad():
-            target = rewards + self.gamma * self.target_net(next_states).max(1)[0] * (1 - dones)
-        loss = nn.MSELoss()(q_values, target)
-        nn.utils.clip_grad_norm_(self.q_net.parameters(), max_norm=1.0)
+            target_q_values = rewards + self.gamma * self.target_net(next_states).max(1)[0] * (1 - dones)
+        # l2_norm = sum(p.pow(2.0).sum() for p in self.q_net.parameters())
+        loss = nn.MSELoss()(q_values, target_q_values)
         self.optimizer.zero_grad()
         loss.backward()
-        self.optimizer.step()   
+        nn.utils.clip_grad_norm_(self.q_net.parameters(), max_norm=1.0)
+        self.optimizer.step()
         ########## END OF YOUR CODE ##########  
 
         if self.train_count % self.target_update_frequency == 0:
             self.target_net.load_state_dict(self.q_net.state_dict())
-            # for target_param, q_param in zip(self.target_net.parameters(), self.q_net.parameters()):
-            #     target_param.data.copy_(self.tau * q_param.data + (1.0 - self.tau) * target_param.data)
-            # self.tau *= 0.997
-            # self.tau = max(self.tau, 0.01)
 
         # NOTE: Enable this part if "loss" is defined
         if self.train_count % 1000 == 0:
-            # print(f'\nUpdating target network, now tau {self.tau}\n')
-            print(f"[Train #{self.train_count}] Loss: {loss.item():.4f} Q mean: {q_values.mean().item():.3f} std: {q_values.std().item():.3f}")
+           print(f"[Train #{self.train_count}] Loss: {loss.item():.4f} Q mean: {q_values.mean().item():.3f} std: {q_values.std().item():.3f}")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--save-dir", type=str, default="./results_v1")
-    parser.add_argument("--wandb-run-name", type=str, default="cartpole-run")
-    parser.add_argument("--batch-size", type=int, default=128)
-    parser.add_argument("--memory-size", type=int, default=100000)
-    parser.add_argument("--lr", type=float, default=0.0001)
+    parser.add_argument("--save-dir", type=str, default="./results_v2")
+    parser.add_argument("--wandb-run-name", type=str, default="pong-run")
+    parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument("--memory-size", type=int, default=500000)
+    parser.add_argument("--lr", type=float, default=0.000025)
     parser.add_argument("--discount-factor", type=float, default=0.99)
     parser.add_argument("--epsilon-start", type=float, default=1.0)
-    parser.add_argument("--epsilon-decay", type=float, default=0.9996)
-    parser.add_argument("--epsilon-min", type=float, default=0)
-    parser.add_argument("--target-update-frequency", type=int, default=25)
-    parser.add_argument("--replay-start-size", type=int, default=256)
+    parser.add_argument("--epsilon-decay", type=float, default=0.999997)
+    parser.add_argument("--epsilon-min", type=float, default=0.05)
+    parser.add_argument("--target-update-frequency", type=int, default=5000)
+    parser.add_argument("--replay-start-size", type=int, default=128)
     parser.add_argument("--max-episode-steps", type=int, default=10000)
-    parser.add_argument("--train-per-step", type=int, default=2)
-    parser.add_argument("--tau", type=float, default=1)
-
+    parser.add_argument("--train-per-step", type=int, default=1)
     args = parser.parse_args()
 
-    wandb.init(project="DLP-Lab5-DQN-CartPole", name=args.wandb_run_name, save_code=True)
+    wandb.init(project="DLP-Lab5-DQN-Pong", name=args.wandb_run_name, save_code=True)
     agent = DQNAgent(args=args)
     agent.run()
