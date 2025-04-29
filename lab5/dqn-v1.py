@@ -67,7 +67,7 @@ class DQNAgent:
         self.test_env = gym.make(env_name, render_mode="rgb_array")
         self.num_actions = self.env.action_space.n
 
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device("cuda:"+args.gpu if torch.cuda.is_available() else "cpu")
         print("Using device:", self.device)
 
 
@@ -83,7 +83,6 @@ class DQNAgent:
         self.epsilon = args.epsilon_start
         self.epsilon_decay = args.epsilon_decay
         self.epsilon_min = args.epsilon_min
-        self.tau = args.tau
 
         self.env_count = 0
         self.train_count = 0
@@ -139,7 +138,6 @@ class DQNAgent:
                     # Add additional wandb logs for debugging if needed 
                     ########## END OF YOUR CODE ##########   
             print(f"[Eval] Ep: {ep} Total Reward: {total_reward} SC: {self.env_count} UC: {self.train_count} Eps: {self.epsilon:.4f}")
-            rewards.append(total_reward)
             wandb.log({
                 "Episode": ep,
                 "Total Reward": total_reward,
@@ -149,18 +147,15 @@ class DQNAgent:
             })
             ########## YOUR CODE HERE  ##########
             # Add additional wandb logs for debugging if needed 
-            wandb.log({"Mean Reward": np.mean(rewards[-20:])})
-            if np.mean(rewards[-20:]) > 480:
-                print("Solved!")
-                break
             ########## END OF YOUR CODE ##########  
             if ep % 100 == 0:
                 model_path = os.path.join(self.save_dir, f"model_ep{ep}.pt")
                 torch.save(self.q_net.state_dict(), model_path)
                 print(f"Saved model checkpoint to {model_path}")
 
-            if ep % 20 == 0:
+            if ep % 1 == 0:
                 eval_reward = self.evaluate()
+                rewards.append(eval_reward)
                 if eval_reward > self.best_reward:
                     self.best_reward = eval_reward
                     model_path = os.path.join(self.save_dir, "best_model.pt")
@@ -172,6 +167,11 @@ class DQNAgent:
                     "Update Count": self.train_count,
                     "Eval Reward": eval_reward,
                 })
+            if np.mean(rewards[-20:]) > 485:
+                model_path = os.path.join(self.save_dir, "best_model.pt")
+                torch.save(self.q_net.state_dict(), model_path)
+                print("Solved!")
+                break
 
     def evaluate(self):
         obs, _ = self.test_env.reset()
@@ -234,14 +234,9 @@ class DQNAgent:
 
         if self.train_count % self.target_update_frequency == 0:
             self.target_net.load_state_dict(self.q_net.state_dict())
-            # for target_param, q_param in zip(self.target_net.parameters(), self.q_net.parameters()):
-            #     target_param.data.copy_(self.tau * q_param.data + (1.0 - self.tau) * target_param.data)
-            # self.tau *= 0.997
-            # self.tau = max(self.tau, 0.01)
 
         # NOTE: Enable this part if "loss" is defined
         if self.train_count % 1000 == 0:
-            # print(f'\nUpdating target network, now tau {self.tau}\n')
             print(f"[Train #{self.train_count}] Loss: {loss.item():.4f} Q mean: {q_values.mean().item():.3f} std: {q_values.std().item():.3f}")
 
 
@@ -260,8 +255,7 @@ if __name__ == "__main__":
     parser.add_argument("--replay-start-size", type=int, default=256)
     parser.add_argument("--max-episode-steps", type=int, default=10000)
     parser.add_argument("--train-per-step", type=int, default=2)
-    parser.add_argument("--tau", type=float, default=1)
-
+    parser.add_argument("-g", "--gpu", type=str, default='0', help="Use GPU for training")
     args = parser.parse_args()
 
     wandb.init(project="DLP-Lab5-DQN-CartPole", name=args.wandb_run_name, save_code=True)

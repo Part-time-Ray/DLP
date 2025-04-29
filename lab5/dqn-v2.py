@@ -45,21 +45,26 @@ class DQN(nn.Module):
         #)       
         ########## YOUR CODE HERE (5~10 lines) ##########
         self.network = nn.Sequential(
-            nn.Conv2d(4, 32, kernel_size=8, stride=4),  # Input: 4x84x84, Output: 32x20x20
+            # Layer 1: 4x84x84 -> 32x84x84
+            nn.Conv2d(4, 32, kernel_size=3, padding=1),
             nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=4, stride=2),  # Output: 64x9x9
+            nn.MaxPool2d(kernel_size=2, stride=2),  # Downsample to 32x42x42
+            # Layer 2: 32x42x42 -> 64x42x42
+            nn.Conv2d(32, 64, kernel_size=3, padding=1),
             nn.ReLU(),
-            nn.Conv2d(64, 64, kernel_size=3, stride=1),  # Output: 64x7x7
+            nn.MaxPool2d(kernel_size=2, stride=2),  # Downsample to 64x21x21
+            # Layer 3: 64x21x21 -> 64x21x21
+            nn.Conv2d(64, 64, kernel_size=3, padding=1),
             nn.ReLU(),
-            nn.Flatten(),
-            nn.Linear(64 * 7 * 7, 512),
+            nn.Flatten(),  # Flatten to 64*21*21
+
+            nn.Linear(64 * 21 * 21, 512),
             nn.ReLU(),
-            nn.Dropout(0.2),
+
             nn.Linear(512, num_actions)
-        )       
+        )
         self.network.apply(init_weights)
         ########## END OF YOUR CODE ##########
-
     def forward(self, x):
         return self.network(x)
 
@@ -88,36 +93,6 @@ class AtariPreprocessor:
         return np.stack(self.frames, axis=0)
 
 
-class PrioritizedReplayBuffer:
-    """
-        Prioritizing the samples in the replay memory by the Bellman error
-        See the paper (Schaul et al., 2016) at https://arxiv.org/abs/1511.05952
-    """ 
-    def __init__(self, capacity, alpha=0.6, beta=0.4):
-        self.capacity = capacity
-        self.alpha = alpha
-        self.beta = beta
-        self.buffer = []
-        self.priorities = np.zeros((capacity,), dtype=np.float32)
-        self.pos = 0
-
-    def add(self, transition, error):
-        ########## YOUR CODE HERE (for Task 3) ########## 
-                    
-        ########## END OF YOUR CODE (for Task 3) ########## 
-        return 
-    def sample(self, batch_size):
-        ########## YOUR CODE HERE (for Task 3) ########## 
-                    
-        ########## END OF YOUR CODE (for Task 3) ########## 
-        return
-    def update_priorities(self, indices, errors):
-        ########## YOUR CODE HERE (for Task 3) ########## 
-                    
-        ########## END OF YOUR CODE (for Task 3) ########## 
-        return
-        
-
 class DQNAgent:
     def __init__(self, env_name="ALE/Pong-v5", args=None):
         self.env = gym.make(env_name, render_mode="rgb_array")
@@ -125,7 +100,7 @@ class DQNAgent:
         self.num_actions = self.env.action_space.n
         self.preprocessor = AtariPreprocessor()
 
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device("cuda:"+args.gpu if torch.cuda.is_available() else "cpu")
         print("Using device:", self.device)
 
 
@@ -134,7 +109,8 @@ class DQNAgent:
         self.target_net = DQN(self.num_actions).to(self.device)
         self.target_net.load_state_dict(self.q_net.state_dict())
         self.optimizer = optim.Adam(self.q_net.parameters(), lr=args.lr)
-
+        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='max', factor=0.5, patience=45, threshold=1e-3)
+        
         self.batch_size = args.batch_size
         self.gamma = args.discount_factor
         self.epsilon = args.epsilon_start
@@ -153,6 +129,7 @@ class DQNAgent:
         os.makedirs(self.save_dir, exist_ok=True)
 
     def select_action(self, state):
+        self.q_net.eval()
         if random.random() < self.epsilon:
             return random.randint(0, self.num_actions - 1)
         state_tensor = torch.from_numpy(np.array(state)).float().unsqueeze(0).to(self.device)
@@ -199,7 +176,6 @@ class DQNAgent:
                     
                     ########## END OF YOUR CODE ##########   
             print(f"[Eval] Ep: {ep} Total Reward: {total_reward} SC: {self.env_count} UC: {self.train_count} Eps: {self.epsilon:.4f}")
-            rewards.append(total_reward)
             wandb.log({
                 "Episode": ep,
                 "Total Reward": total_reward,
@@ -209,29 +185,35 @@ class DQNAgent:
             })
             ########## YOUR CODE HERE  ##########
             # Add additional wandb logs for debugging if needed 
-            wandb.log({"Mean Reward": np.mean(rewards[-20:])})
-            if np.mean(rewards[-20:]) > 19:
-                print("Solved!")
-                break
             ########## END OF YOUR CODE ##########  
             if ep % 100 == 0:
                 model_path = os.path.join(self.save_dir, f"model_ep{ep}.pt")
                 torch.save(self.q_net.state_dict(), model_path)
                 print(f"Saved model checkpoint to {model_path}")
 
-            if ep % 20 == 0:
+            if ep % 1 == 0:
                 eval_reward = self.evaluate()
-                if eval_reward > self.best_reward:
+                rewards.append(eval_reward)
+                self.scheduler.step(eval_reward)
+                if np.mean(rewards[-20:]) > self.best_reward:
                     self.best_reward = eval_reward
                     model_path = os.path.join(self.save_dir, "best_model.pt")
                     torch.save(self.q_net.state_dict(), model_path)
-                    print(f"Saved new best model to {model_path} with reward {eval_reward}")
+                    print(f"Saved new best model to {model_path} with reward {np.mean(rewards[-20:])}")
                 print(f"[TrueEval] Ep: {ep} Eval Reward: {eval_reward:.2f} SC: {self.env_count} UC: {self.train_count}")
                 wandb.log({
                     "Env Step Count": self.env_count,
                     "Update Count": self.train_count,
-                    "Eval Reward": eval_reward
+                    "Eval Reward": eval_reward,
+                    "Average Reward": np.mean(rewards[-20:]),
+                    "Best Reward": self.best_reward,
+                    "Learning Rate": self.optimizer.param_groups[0]['lr']
                 })
+            if np.mean(rewards[-20:]) > 19.5 and len(rewards) > 20:
+                model_path = os.path.join(self.save_dir, "best_model.pt")
+                torch.save(self.q_net.state_dict(), model_path)
+                print("Solved!")
+                break
 
     def evaluate(self):
         obs, _ = self.test_env.reset()
@@ -252,7 +234,7 @@ class DQNAgent:
 
 
     def train(self):
-
+        self.q_net.train()
         if len(self.memory) < self.replay_start_size:
             return 
         
@@ -281,7 +263,8 @@ class DQNAgent:
         with torch.no_grad():
             target_q_values = rewards + self.gamma * self.target_net(next_states).max(1)[0] * (1 - dones)
         # l2_norm = sum(p.pow(2.0).sum() for p in self.q_net.parameters())
-        loss = nn.MSELoss()(q_values, target_q_values)
+        # loss = nn.MSELoss()(q_values, target_q_values)
+        loss = nn.functional.smooth_l1_loss(q_values, target_q_values)
         self.optimizer.zero_grad()
         loss.backward()
         nn.utils.clip_grad_norm_(self.q_net.parameters(), max_norm=1.0)
@@ -298,21 +281,22 @@ class DQNAgent:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--save-dir", type=str, default="./results_v2")
+    parser.add_argument("--save-dir", type=str, default="./results_v2_smooth_loss_new")
     parser.add_argument("--wandb-run-name", type=str, default="pong-run")
     parser.add_argument("--batch-size", type=int, default=32)
-    parser.add_argument("--memory-size", type=int, default=500000)
-    parser.add_argument("--lr", type=float, default=0.000025)
+    parser.add_argument("--memory-size", type=int, default=50000)
+    parser.add_argument("--lr", type=float, default=0.0001)
     parser.add_argument("--discount-factor", type=float, default=0.99)
     parser.add_argument("--epsilon-start", type=float, default=1.0)
-    parser.add_argument("--epsilon-decay", type=float, default=0.999997)
-    parser.add_argument("--epsilon-min", type=float, default=0.05)
-    parser.add_argument("--target-update-frequency", type=int, default=5000)
-    parser.add_argument("--replay-start-size", type=int, default=128)
+    parser.add_argument("--epsilon-decay", type=float, default=0.99999)
+    parser.add_argument("--epsilon-min", type=float, default=0.01)
+    parser.add_argument("--target-update-frequency", type=int, default=2000)
+    parser.add_argument("--replay-start-size", type=int, default=2048)
     parser.add_argument("--max-episode-steps", type=int, default=10000)
     parser.add_argument("--train-per-step", type=int, default=1)
+    parser.add_argument("-g", "--gpu", type=str, default='0', help="Use GPU for training")
     args = parser.parse_args()
 
-    wandb.init(project="DLP-Lab5-DQN-Pong", name=args.wandb_run_name, save_code=True)
+    wandb.init(project="DLP-Lab5-DQN-Pong-v2", name=args.wandb_run_name, save_code=True)
     agent = DQNAgent(args=args)
     agent.run()
