@@ -141,5 +141,4 @@ if __name__ == "__main__":
         args.model_path = model_path
         args.seed = seed
         args.output_dir = output_dir
-        print(f"Evaluating model {model_path} with seed {seed}")
         evaluate(args)

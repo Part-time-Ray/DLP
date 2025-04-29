@@ -164,7 +164,7 @@ class DQNAgent:
         self.target_net = DQN(self.num_actions).to(self.device)
         self.target_net.load_state_dict(self.q_net.state_dict())
         self.optimizer = optim.Adam(self.q_net.parameters(), lr=args.lr)
-        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='max', factor=0.5, patience=50, threshold=1e-3)
+        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='max', factor=0.5, patience=80, threshold=1e-3)
         
         self.batch_size = args.batch_size
         self.gamma = args.discount_factor
@@ -174,9 +174,6 @@ class DQNAgent:
         # self.memory = deque(maxlen=args.memory_size)
         self.memory = PrioritizedReplayBuffer(args.memory_size)
         self.multi_step = args.multi_step
-
-        # self.q_net.load_state_dict(torch.load('./results_v2_smooth_loss/model_ep900.pt', map_location=self.device))
-        # self.target_net.load_state_dict(self.q_net.state_dict())
 
         self.env_count = 0
         self.train_count = 0
@@ -253,7 +250,6 @@ class DQNAgent:
                     })
                     ########## YOUR CODE HERE  ##########
                     # Add additional wandb logs for debugging if needed 
-                    
                     ########## END OF YOUR CODE ##########   
             print(f"[Eval] Ep: {ep} Total Reward: {total_reward} SC: {self.env_count} UC: {self.train_count} Eps: {self.epsilon:.4f}")
             wandb.log({
@@ -365,7 +361,7 @@ class DQNAgent:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--save-dir", type=str, default="./results_v3_dqn_smooth_loss_multi_step_2_more")
+    parser.add_argument("--save-dir", type=str, default="./results_v3")
     parser.add_argument("--wandb-run-name", type=str, default="pong-run")
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--memory-size", type=int, default=50000)
@@ -377,8 +373,8 @@ if __name__ == "__main__":
     parser.add_argument("--target-update-frequency", type=int, default=2000)
     parser.add_argument("--replay-start-size", type=int, default=2048)
     parser.add_argument("--max-episode-steps", type=int, default=10000)
-    parser.add_argument("--train-per-step", type=int, default=4)
-    parser.add_argument("--multi-step", type=int, default=2)
+    parser.add_argument("--train-per-step", type=int, default=2)
+    parser.add_argument("--multi-step", type=int, default=1)
     parser.add_argument("-g", "--gpu", type=str, default='0', help="Use GPU for training")
     args = parser.parse_args()
 

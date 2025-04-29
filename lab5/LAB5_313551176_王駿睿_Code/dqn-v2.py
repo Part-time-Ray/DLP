@@ -109,7 +109,7 @@ class DQNAgent:
         self.target_net = DQN(self.num_actions).to(self.device)
         self.target_net.load_state_dict(self.q_net.state_dict())
         self.optimizer = optim.Adam(self.q_net.parameters(), lr=args.lr)
-        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='max', factor=0.5, patience=45, threshold=1e-3)
+        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='max', factor=0.5, patience=80, threshold=1e-3)
         
         self.batch_size = args.batch_size
         self.gamma = args.discount_factor
@@ -173,7 +173,6 @@ class DQNAgent:
                     })
                     ########## YOUR CODE HERE  ##########
                     # Add additional wandb logs for debugging if needed 
-                    
                     ########## END OF YOUR CODE ##########   
             print(f"[Eval] Ep: {ep} Total Reward: {total_reward} SC: {self.env_count} UC: {self.train_count} Eps: {self.epsilon:.4f}")
             wandb.log({
@@ -196,7 +195,7 @@ class DQNAgent:
                 rewards.append(eval_reward)
                 self.scheduler.step(eval_reward)
                 if np.mean(rewards[-20:]) > self.best_reward:
-                    self.best_reward = eval_reward
+                    self.best_reward = np.mean(rewards[-20:])
                     model_path = os.path.join(self.save_dir, "best_model.pt")
                     torch.save(self.q_net.state_dict(), model_path)
                     print(f"Saved new best model to {model_path} with reward {np.mean(rewards[-20:])}")
