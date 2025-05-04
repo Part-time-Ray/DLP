@@ -1,0 +1,21 @@
+imageio
+torch
+torchvision
+torchaudio
+numpy
+matplotlib
+opencv-python
+pillow --only-binary :all:
+matplotlib
+pyyaml
+pandas
+tqdm
+scipy
+diffusers
+
+
+# python -m venv env 
+# source env/bin/activate 
+# python -m pip install --upgrade pip 
+# pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu118 --verbose
+# cuda 11.8 needs compatible with GPU
