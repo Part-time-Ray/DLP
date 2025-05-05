@@ -34,6 +34,7 @@ def main(args):
             if label[objects[name]]:
                 print(name)
 
+# 6 9 22
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()

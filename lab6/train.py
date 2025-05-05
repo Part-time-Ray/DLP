@@ -14,11 +14,13 @@ from torch import stack
 from tqdm import tqdm
 import imageio
 # from unet import UNet
-from unet_2 import UNet
+# from unet_2 import UNet
+from unet_3 import UNet
 from dataloader import Dataset
 from utils import BetaScheduler, SMARTSave, inference
 import matplotlib.pyplot as plt
 from math import log10
+from diffusers.optimization import get_cosine_schedule_with_warmup
 
 # implement diffusion model
 def main(args):
@@ -45,8 +47,12 @@ def main(args):
         model = nn.DataParallel(model)
     model = model.to(device)
 
-    optimizer = optim.Adam(model.parameters(), lr=args.lr)
-    # schedular = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=5, cooldown=3, min_lr=5e-9)
+    optimizer = optim.AdamW(model.parameters(), lr=args.lr)
+    scheduler =  get_cosine_schedule_with_warmup(
+        optimizer=optimizer,
+        num_warmup_steps=0,
+        num_training_steps= len(train_loader) * 500,
+    )
     criterion = nn.MSELoss()
     smart_save = SMARTSave(postfix = args.postfix)
 
@@ -59,11 +65,12 @@ def main(args):
             label = label.to(device)
             t = torch.randint(0, args.max_time_step, (x.size(0),), device=device).long()
             x_t, noise = beta_scheduler.make_noise(x, t)
-            optimizer.zero_grad()
             pred_noise = model(x_t, label, t)
             loss = criterion(pred_noise, noise)
+            optimizer.zero_grad()
             loss.backward()
             optimizer.step()
+            scheduler.step()
             total_loss += loss.item()
             tq.set_description(f"Epoch [{epoch+1}/{args.num_epoch}], loss: {total_loss / (i + 1):.6f}")
 
@@ -82,7 +89,6 @@ def main(args):
                     total_loss += loss.item()
                     tq.set_description(f"[Eval] loss: {total_loss / (i + 1)}")
             avg_loss = total_loss / len(val_loader)
-            # schedular.step(avg_loss)
             smart_save(model.module if isinstance(model, nn.DataParallel) else model, avg_loss)
         if (epoch + 1) % 5 == 0:
             gt, label = eval_dataset[random.randint(0, len(eval_dataset)-1)]
@@ -93,9 +99,9 @@ def main(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(add_help=True)
-    parser.add_argument('--batch_size',           type=int,    default=32)
+    parser.add_argument('--batch_size', '-b',     type=int,    default=32)
     parser.add_argument('--load_path', '-lp',     type=str,    default='')
-    parser.add_argument('--lr', '-lr',            type=float,  default=1e-5,     help="initial learning rate")
+    parser.add_argument('--lr', '-lr',            type=float,  default=1e-4,     help="initial learning rate")
     parser.add_argument('--device',               type=str, choices=["cuda", "cpu"], default="cuda")
     parser.add_argument('--gpu', '-g',            type=str, default='0')
     parser.add_argument('--num_workers',          type=int, default=12)

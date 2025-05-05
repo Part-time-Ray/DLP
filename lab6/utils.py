@@ -11,16 +11,14 @@ def inference(model, beta_scheduler, label, image_size=(3, 64, 64), device='cuda
             t_tensor = torch.full((batch_size,), t, device=device, dtype=torch.long)
             pred_noise = model(x_t, label, t_tensor)
             x_t = beta_scheduler.reverse(x_t, t_tensor, pred_noise)
-        # print("Before clamp:", torch.max(x_t), torch.min(x_t))
         x_t = x_t.clamp(-1, 1)
-        # print("After clamp:", torch.max(x_t), torch.min(x_t))
         return x_t
 
 class BetaScheduler:
     def __init__(self, num_diffusion_timesteps=2000, beta_start=1e-4, beta_end=0.02, device='cuda'):
         self.device = device
         self.num_diffusion_timesteps = num_diffusion_timesteps
-        self.beta_schedular = DDPMScheduler(num_train_timesteps=self.num_diffusion_timesteps, beta_start=beta_start, beta_end=beta_end, beta_schedule='linear') # squaredcos_cap_v2
+        self.beta_schedular = DDPMScheduler(num_train_timesteps=self.num_diffusion_timesteps, beta_start=beta_start, beta_end=beta_end, beta_schedule='squaredcos_cap_v2') # squaredcos_cap_v2, linear
 
 
     def make_noise(self, x_start, t):
