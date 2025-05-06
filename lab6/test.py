@@ -1,8 +1,7 @@
 from torchvision.utils import save_image
 # from unet import UNet
 # from unet_2 import UNet
-# from unet_3 import UNet
-from unet_4 import UNet
+from unet_3 import UNet
 from utils import BetaScheduler, inference
 from dataloader import get_test_dataset
 from evaluator import evaluation_model
@@ -35,7 +34,7 @@ def main(args):
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model_path', '-p', type=str, default='result/best_model.pt', help='Path to the trained model')
+    parser.add_argument('--model_path', '-p', type=str, default='result/final_model.pt', help='Path to the trained model')
     parser.add_argument('--max_time_step', '-st', type=int, default=1000, help='Number of diffusion steps')
     parser.add_argument('--gpu', '-g', type=str, default='0', help='GPU index to use')
     args = parser.parse_args()
