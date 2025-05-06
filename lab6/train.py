@@ -22,6 +22,7 @@ import matplotlib.pyplot as plt
 from math import log10
 from diffusers.optimization import get_cosine_schedule_with_warmup
 
+
 # implement diffusion model
 def main(args):
     train_dataset = Dataset(mode='train', folder_path='iclevr')
@@ -90,12 +91,17 @@ def main(args):
                     tq.set_description(f"[Eval] loss: {total_loss / (i + 1)}")
             avg_loss = total_loss / len(val_loader)
             smart_save(model.module if isinstance(model, nn.DataParallel) else model, avg_loss)
-        if (epoch + 1) % 5 == 0:
+        if (epoch + 1) % 10 == 0:
             gt, label = eval_dataset[random.randint(0, len(eval_dataset)-1)]
             label = label.unsqueeze(0).to(device)
             img = inference(model, beta_scheduler, label, image_size=(3, 64, 64), device=device)
+            checkpoint_path = os.path.join('result', ('checkpoint' if args.postfix == '' else 'checkpoint' + '_' + args.postfix))
+            os.makedirs(checkpoint_path, exist_ok=True)
+            torch.save(model.state_dict(), os.path.join(checkpoint_path, f'epoch_{epoch+1}.pt'))
             save_image(img, os.path.join(f'inference{('_' if args.postfix != '' else '') + args.postfix}.png'), normalize=True)
             save_image(gt, os.path.join(f'ground_truth{('_' if args.postfix != '' else '') + args.postfix}.png'), normalize=True)
+    # save the model
+    torch.save(model.state_dict(), os.path.join('result', f'final_model{('_' if args.postfix != '' else '') + args.postfix}.pt'))
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(add_help=True)

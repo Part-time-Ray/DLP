@@ -1,5 +1,6 @@
 from torchvision.utils import save_image
-from unet import UNet
+# from unet import UNet
+from unet_4 import UNet
 from utils import BetaScheduler
 from dataloader import get_test_dataset
 from evaluator import evaluation_model
@@ -12,11 +13,23 @@ from evaluator import evaluation_model
 from torchvision import transforms
 from torch.utils.data import DataLoader
 from utils import BetaScheduler, inference
-from unet_2 import UNet
+# from unet_2 import UNet
+from torchvision.datasets.folder import default_loader as imgloader
 
 
 
 def main(args):
+    # transform = transforms.Compose([
+    #         transforms.Resize((64, 64)),
+    #         transforms.RandomHorizontalFlip(p=0.5),
+    #         transforms.ToTensor(),
+    #         transforms.Normalize((0.5, 0.5, 0.5),(0.5, 0.5, 0.5)),
+    #     ])
+    # data = []
+    # for i in range(32):
+    #     data.append(imgloader(os.path.join('images_', 'test', f'{i}.png')))
+    # stack = torch.stack([transform(data[i]) for i in range(32)], dim=0)
+    # save_image(stack, "temp.png", normalize=True, nrow=8)
     device = torch.device('cuda:' + args.gpu if torch.cuda.is_available() else "cpu")
     # model = UNet(args.max_time_step, in_channels=3, out_channels=3).to(device)
     model = UNet().to(device)

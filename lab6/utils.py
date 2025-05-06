@@ -1,5 +1,7 @@
 import torch
 import os
+import tqdm
+from torchvision.utils import save_image
 from diffusers import DDPMScheduler
 
 def inference(model, beta_scheduler, label, image_size=(3, 64, 64), device='cuda'):
@@ -7,7 +9,8 @@ def inference(model, beta_scheduler, label, image_size=(3, 64, 64), device='cuda
     with torch.no_grad():
         batch_size = label.shape[0]
         x_t = torch.randn(batch_size, *image_size, device=device)
-        for t in range(beta_scheduler.num_diffusion_timesteps - 1, -1, -1):
+        tq = tqdm.tqdm(beta_scheduler.beta_schedular.timesteps, ncols=100)
+        for t in tq:
             t_tensor = torch.full((batch_size,), t, device=device, dtype=torch.long)
             pred_noise = model(x_t, label, t_tensor)
             x_t = beta_scheduler.reverse(x_t, t_tensor, pred_noise)
@@ -15,7 +18,7 @@ def inference(model, beta_scheduler, label, image_size=(3, 64, 64), device='cuda
         return x_t
 
 class BetaScheduler:
-    def __init__(self, num_diffusion_timesteps=2000, beta_start=1e-4, beta_end=0.02, device='cuda'):
+    def __init__(self, num_diffusion_timesteps=1000, beta_start=1e-4, beta_end=0.02, device='cuda'):
         self.device = device
         self.num_diffusion_timesteps = num_diffusion_timesteps
         self.beta_schedular = DDPMScheduler(num_train_timesteps=self.num_diffusion_timesteps, beta_start=beta_start, beta_end=beta_end, beta_schedule='squaredcos_cap_v2') # squaredcos_cap_v2, linear
@@ -31,6 +34,21 @@ class BetaScheduler:
         # all value in t is same
         assert all(t == t[0])
         return self.beta_schedular.step(noise, t[0].cpu(), x_t).prev_sample
+    def reverse_all(self, model, label, image_size=(3, 64, 64), mode = 'test'):
+        # all value in t is same
+        with torch.no_grad():
+            x_t = torch.randn(label.shape[0], *image_size, device=self.device)
+            tq = tqdm.tqdm(self.beta_schedular.timesteps, ncols=50)
+            for i in tq:
+                pred_noise = model(x_t, label, i)
+                x_t = self.beta_schedular.step(pred_noise, i, x_t).prev_sample
+                if i % 100 == 0:
+                    # save image
+                    x_img = x_t.clamp(-1, 1)
+                    stack = torch.stack([x_img[i] for i in range(x_img.shape[0])], dim=0)
+                    os.makedirs(os.path.join('inference', mode), exist_ok=True)
+                    save_image(stack, os.path.join(f'inference', mode, f'{i}.png'), normalize=True, nrow=8)
+            return x_t
 
 # class BetaScheduler:
 #     def __init__(self, num_diffusion_timesteps=2000, beta_start=1e-4, beta_end=0.02, device='cuda'):
