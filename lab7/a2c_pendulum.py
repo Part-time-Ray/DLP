@@ -39,8 +39,8 @@ class Actor(nn.Module):
         self.mu_head = nn.Linear(128, out_dim)
         self.log_sigma_head = nn.Linear(128, out_dim)
         
-        initialize_uniformly(self.fc1)
-        initialize_uniformly(self.fc2)
+        # initialize_uniformly(self.fc1)
+        # initialize_uniformly(self.fc2)
         initialize_uniformly(self.mu_head)
         initialize_uniformly(self.log_sigma_head)
         #############################
@@ -49,14 +49,13 @@ class Actor(nn.Module):
         """Forward method implementation."""
 
         ############TODO#############
-        x = F.relu(self.fc1(state))
-        x = F.relu(self.fc2(x))
-        mu = self.mu_head(x)
-        log_sigma = self.log_sigma_head(x)
+        x = F.relu(self.fc2(F.relu(self.fc1(state))))
+
+        mu = torch.tanh(self.mu_head(x)) * 2
+        log_sigma = F.softplus(self.log_sigma_head(x))
         sigma = torch.exp(log_sigma)
         dist = Normal(mu, sigma)
         action = dist.sample()
-        return action, dist
         #############################
 
         return action, dist
@@ -72,8 +71,8 @@ class Critic(nn.Module):
         self.fc1 = nn.Linear(in_dim, 128)
         self.fc2 = nn.Linear(128, 128)
         self.value_head = nn.Linear(128, 1)
-        initialize_uniformly(self.fc1)
-        initialize_uniformly(self.fc2)
+        # initialize_uniformly(self.fc1)
+        # initialize_uniformly(self.fc2)
         initialize_uniformly(self.value_head)
         #############################
 
@@ -84,7 +83,6 @@ class Critic(nn.Module):
         x = F.relu(self.fc1(state))
         x = F.relu(self.fc2(x))
         value = self.value_head(x)
-        return value
         #############################
 
         return value
@@ -113,7 +111,6 @@ class A2CAgent:
         self.env = env
         self.gamma = args.discount_factor
         self.entropy_weight = args.entropy_weight
-        self.seed = args.seed
         self.actor_lr = args.actor_lr
         self.critic_lr = args.critic_lr
         self.num_episodes = args.num_episodes
@@ -149,7 +146,7 @@ class A2CAgent:
 
         if not self.is_test:
             log_prob = dist.log_prob(selected_action).sum(dim=-1)
-            self.transition = [state, log_prob]
+            self.transition = [state, log_prob, dist]
 
         return selected_action.clamp(-2.0, 2.0).cpu().detach().numpy()
 
@@ -165,41 +162,42 @@ class A2CAgent:
 
     def update_model(self) -> Tuple[torch.Tensor, torch.Tensor]:
         """Update the model by gradient descent."""
-        state, log_prob, next_state, reward, done = self.transition
+        state, log_prob, dist, next_state, reward, done = self.transition
 
         # Q_t   = r + gamma * V(s_{t+1})  if state != Terminal
         #       = r                       otherwise
-        state = torch.FloatTensor(state).to(self.device)
-        next_state = torch.FloatTensor(next_state).to(self.device)
-        reward = torch.FloatTensor([reward]).to(self.device)
-        mask = torch.FloatTensor([1 - done]).to(self.device)
+
+        # state = torch.tensor(state, dtype=torch.float32, device=self.device)
+        next_state = torch.tensor(next_state, dtype=torch.float32, device=self.device)
+        reward = torch.tensor(reward, dtype=torch.float32, device=self.device)
+        mask = torch.tensor(1 - done, dtype=torch.float32, device=self.device)
         value = self.critic(state)
         next_value = self.critic(next_state)
-        td_error = value - reward + self.gamma * next_value * mask
+        td_target = reward + self.gamma * next_value * mask
+
         ############TODO#############
         # value_loss = ?
-        value_loss = td_error.pow(2).mean()
+        value_loss = F.smooth_l1_loss(value, td_target.detach())
         #############################
 
         # update value
         self.critic_optimizer.zero_grad()
         value_loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=1.0)
         self.critic_optimizer.step()
 
         # advantage = Q_t - V(s_t)
         ############TODO#############
         # policy_loss = ?
-        advantage = td_error.detach()
-        policy_loss = -(log_prob * advantage).mean()
-        _, dist = self.actor(state)
-        entropy = dist.entropy().mean()
-        policy_loss = policy_loss - self.entropy_weight * entropy
+        advantage = (td_target - value).detach()
+        policy_loss = -(log_prob * advantage) + self.entropy_weight * -log_prob
         #############################
         # update policy
         self.actor_optimizer.zero_grad()
         policy_loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=1.0)
         self.actor_optimizer.step()
-
+        self.transition = []
         return policy_loss.item(), value_loss.item()
 
     def train(self):
@@ -207,18 +205,20 @@ class A2CAgent:
         self.is_test = False
         step_count = 0
         best_score = -np.inf
+        total_score = []
+        os.makedirs("v1", exist_ok=True)
         best_model_path = os.path.join("v1", f"LAB7_313551176_task1_a2c_pendulum.pt")
-        
-        for ep in tqdm(range(1, self.num_episodes)): 
+        tq = tqdm(range(1, self.num_episodes), ncols=100)
+        for ep in tq: 
             actor_losses, critic_losses, scores = [], [], []
-            state, _ = self.env.reset(seed=self.seed)
+            state, _ = self.env.reset()
             score = 0
             done = False
+            self.transition = []
             while not done:
                 self.env.render()  # Render the environment
                 action = self.select_action(state)
                 next_state, reward, done = self.step(action)
-
                 actor_loss, critic_loss = self.update_model()
                 actor_losses.append(actor_loss)
                 critic_losses.append(critic_loss)
@@ -235,32 +235,38 @@ class A2CAgent:
                 # if episode ends
                 if done:
                     scores.append(score)
-                    avg_score = np.mean(scores[-20:])
-                    print(f"Episode {ep}: Total Reward = {score}")
+                    # print(f"Episode {ep}: Total Reward = {score}")
                     # W&B logging
                     wandb.log({
                         "episode": ep,
                         "return": score,
-                        "avg_return": avg_score,
                         })  
-                    if avg_score > best_score and avg_score >= -150:
-                        best_score = avg_score
-                        state_dict = {
-                            'actor': self.actor.state_dict(),
-                            'critic': self.critic.state_dict()
-                        }
-                        torch.save(state_dict, best_model_path)
-                        print(f"Saved best model at episode {ep} with score {avg_score} to {best_model_path}")
+            eval_score = self.test()
+            total_score.append(eval_score)
+            avg_score = np.mean(total_score[-20:])
+            tq.set_description(f"Score = {eval_score:.2f}, Avg Score = {avg_score:.2f}")
+            wandb.log({"avg_score": avg_score})  
+            if avg_score > best_score and avg_score >= -150:
+                best_score = avg_score
+                state_dict = {
+                    'actor': self.actor.state_dict(),
+                    'critic': self.critic.state_dict()
+                }
+                torch.save(state_dict, best_model_path)
+                # print(f"Saved best model at episode {ep} with score {avg_score} to {best_model_path}")
         torch.save({'actor': self.actor.state_dict(),'critic': self.critic.state_dict()}, "v1_final.pt")
+        self.test(video_folder="video")
+        self.env.close()
 
-    def test(self, video_folder: str):
+    def test(self, video_folder = None):
         """Test the agent."""
         self.is_test = True
 
         tmp_env = self.env
-        self.env = gym.wrappers.RecordVideo(self.env, video_folder=video_folder)
+        if video_folder:
+            self.env = gym.wrappers.RecordVideo(self.env, video_folder=video_folder)
 
-        state, _ = self.env.reset(seed=self.seed)
+        state, _ = self.env.reset()
         done = False
         score = 0
 
@@ -271,10 +277,12 @@ class A2CAgent:
             state = next_state
             score += reward
 
-        print("score: ", score)
+        # print("score: ", score)
         self.env.close()
 
         self.env = tmp_env
+        self.is_test = False
+        return score
 
 def seed_torch(seed):
     torch.manual_seed(seed)
@@ -290,17 +298,12 @@ if __name__ == "__main__":
     parser.add_argument("--actor-lr", type=float, default=1e-4)
     parser.add_argument("--critic-lr", type=float, default=1e-3)
     parser.add_argument("--discount-factor", type=float, default=0.9)
-    parser.add_argument("--num-episodes", type=float, default=1000)
-    parser.add_argument("--seed", type=int, default=77)
-    parser.add_argument("--entropy-weight", type=int, default=1e-2) # entropy can be disabled by setting this to 0
+    parser.add_argument("--num-episodes", type=int, default=1000)
+    parser.add_argument("--entropy-weight", type=float, default=1e-2) # entropy can be disabled by setting this to 0
     args = parser.parse_args()
     
     # environment
     env = gym.make("Pendulum-v1", render_mode="rgb_array")
-    seed = 77
-    random.seed(seed)
-    np.random.seed(seed)
-    seed_torch(seed)
     wandb.init(project="DLP-Lab7-A2C-Pendulum", name=args.wandb_run_name, save_code=True)
     
     agent = A2CAgent(env, args)
