@@ -6,6 +6,7 @@ from utils import BetaScheduler, inference
 from dataloader import get_test_dataset
 from evaluator import evaluation_model
 from torchvision import transforms
+import torch.nn as nn
 import torch
 import os
 
@@ -13,7 +14,11 @@ def main(args):
     device = torch.device('cuda:' + args.gpu if torch.cuda.is_available() else "cpu")
     # model = UNet(args.max_time_step, in_channels=3, out_channels=3).to(device)
     model = UNet().to(device)
-    model.load_state_dict(torch.load(args.model_path, map_location=device))
+
+    state_dict = torch.load(args.model_path, map_location=device)
+    if any(k.startswith('module.') for k in state_dict.keys()):
+        state_dict = {k.replace('module.', '', 1): v for k, v in state_dict.items()}
+    model.load_state_dict(state_dict)
 
     beta_scheduler = BetaScheduler(num_diffusion_timesteps=args.max_time_step, beta_start=1e-4, beta_end=0.02, device=device)
     label, new_label = get_test_dataset(device=device)
