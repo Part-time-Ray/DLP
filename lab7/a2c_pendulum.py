@@ -190,7 +190,7 @@ class A2CAgent:
         ############TODO#############
         # policy_loss = ?
         advantage = (td_target - value).detach()
-        policy_loss = -(log_prob * advantage) + self.entropy_weight * -log_prob
+        policy_loss = -(log_prob * advantage) - self.entropy_weight * dist.entropy()
         #############################
         # update policy
         self.actor_optimizer.zero_grad()
@@ -245,15 +245,14 @@ class A2CAgent:
             total_score.append(eval_score)
             avg_score = np.mean(total_score[-20:])
             tq.set_description(f"Score = {eval_score:.2f}, Avg Score = {avg_score:.2f}")
-            wandb.log({"avg_score": avg_score})  
-            if avg_score > best_score and avg_score >= -150:
+            if avg_score > best_score:
                 best_score = avg_score
-                state_dict = {
-                    'actor': self.actor.state_dict(),
-                    'critic': self.critic.state_dict()
-                }
-                torch.save(state_dict, best_model_path)
+                self.save_model(best_model_path)
                 # print(f"Saved best model at episode {ep} with score {avg_score} to {best_model_path}")
+            wandb.log({"avg_score": avg_score})
+            wandb.log({"best_avg_score": best_score})
+            if (ep+1) % 100 == 0:
+                self.save_model(os.path.join("v1", f"check_point_{ep}.pt"))
         torch.save({'actor': self.actor.state_dict(),'critic': self.critic.state_dict()}, "v1_final.pt")
         self.test(video_folder="video")
         self.env.close()
@@ -283,6 +282,13 @@ class A2CAgent:
         self.env = tmp_env
         self.is_test = False
         return score
+    def save_model(self, path: str):
+        """Save the model."""
+        state_dict = {
+            'actor': self.actor.state_dict(),
+            'critic': self.critic.state_dict()
+        }
+        torch.save(state_dict, path)
 
 def seed_torch(seed):
     torch.manual_seed(seed)
@@ -299,7 +305,7 @@ if __name__ == "__main__":
     parser.add_argument("--critic-lr", type=float, default=1e-3)
     parser.add_argument("--discount-factor", type=float, default=0.9)
     parser.add_argument("--num-episodes", type=int, default=1000)
-    parser.add_argument("--entropy-weight", type=float, default=1e-2) # entropy can be disabled by setting this to 0
+    parser.add_argument("--entropy-weight", type=float, default=0.01) # entropy can be disabled by setting this to 0
     args = parser.parse_args()
     
     # environment

@@ -341,9 +341,11 @@ class PPOAgent:
             actor_loss, critic_loss = self.update_model(next_state)
             actor_losses.append(actor_loss)
             critic_losses.append(critic_loss)
+
             eval_score = self.test()
             eval_scores.append(eval_score)
             avg_eval_score = np.mean(eval_scores[-20:])
+            tq.set_description(f"Score = {eval_score:.2f}, Avg Score = {avg_eval_score:.2f}")
             if avg_eval_score > best_eval_score:
                 best_eval_score = avg_eval_score
                 # save the model
@@ -352,6 +354,8 @@ class PPOAgent:
                     "critic": self.critic.state_dict(),
                 }
                 torch.save(state_dict, best_model_path)
+            wandb.log({"avg_score": avg_eval_score})  
+            wandb.log({"best_avg_score": best_eval_score})
         torch.save({'actor': self.actor.state_dict(),'critic': self.critic.state_dict()}, "v2_final.pt")
         self.test(video_folder="video")
         self.env.close()

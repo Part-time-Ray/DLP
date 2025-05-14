@@ -20,6 +20,7 @@ import torch.optim as optim
 from torch.distributions import Normal
 import argparse
 import wandb
+import os
 from tqdm import tqdm
 
 def init_layer_uniform(layer: nn.Linear, init_w: float = 3e-3) -> nn.Linear:
@@ -43,14 +44,30 @@ class Actor(nn.Module):
 
         ############TODO#############
         # Remeber to initialize the layer weights
+        self.fc1 = nn.Linear(in_dim, 128)
+        self.fc2 = nn.Linear(128, 128)
+        self.mu_head = nn.Linear(128, out_dim)
+        self.log_sigma_head = nn.Linear(128, out_dim)
         
+        self.mu_head = init_layer_uniform(self.mu_head)
+        self.log_sigma_head = init_layer_uniform(self.log_sigma_head)
+        
+        self.log_std_min = log_std_min
+        self.log_std_max = log_std_max
         #############################
 
     def forward(self, state: torch.Tensor) -> torch.Tensor:
         """Forward method implementation."""
         
         ############TODO#############
-
+        x = F.relu(self.fc2(F.relu(self.fc1(state))))
+        mu = torch.tanh(self.mu_head(x)) * 2
+        log_sigma = (torch.tanh(self.log_sigma_head(x)) + 1) / 2
+        log_sigma = self.log_std_min + log_sigma * (self.log_std_max - self.log_std_min)
+        sigma = torch.exp(log_sigma)
+        dist = Normal(mu, sigma)
+        action = dist.sample()
+        action = torch.clamp(action, -2.0, 2.0)
         #############################
 
         return action, dist
@@ -63,14 +80,19 @@ class Critic(nn.Module):
 
         ############TODO#############
         # Remeber to initialize the layer weights
+        self.fc1 = nn.Linear(in_dim, 128)
+        self.fc2 = nn.Linear(128, 128)
+        self.value_head = nn.Linear(128, 1)
         
+        self.value_head = init_layer_uniform(self.value_head)
         #############################
 
     def forward(self, state: torch.Tensor) -> torch.Tensor:
         """Forward method implementation."""
         
         ############TODO#############
-
+        x = F.relu(self.fc2(F.relu(self.fc1(state))))
+        value = self.value_head(x)
         #############################
 
         return value
@@ -80,7 +102,14 @@ def compute_gae(
     """Compute gae."""
 
     ############TODO#############
-
+    gae_returns = list()
+    values.append(next_value)
+    sum = 0
+    for i in range(len(rewards)-1, -1, -1):
+        td_error = rewards[i] + gamma * values[i+1] * masks[i] - values[i]
+        sum = sum * (gamma * tau) * masks[i] + td_error
+        gae_returns.append(sum)
+    gae_returns.reverse()
     #############################
     return gae_returns
 
@@ -135,7 +164,6 @@ class PPOAgent:
         self.num_episodes = args.num_episodes
         self.rollout_len = args.rollout_len
         self.entropy_weight = args.entropy_weight
-        self.seed = args.seed
         self.update_epoch = args.update_epoch
         
         # device: cpu / gpu
@@ -236,13 +264,18 @@ class PPOAgent:
             # actor_loss
             ############TODO#############
             # actor_loss = ?
-            
+            surr1 = adv * ratio
+            surr2 = adv * torch.clamp(ratio, 1 - self.epsilon, 1 + self.epsilon)
+            policy_loss = -torch.min(surr1, surr2).mean()
+            entropy = dist.entropy().mean()
+            actor_loss = policy_loss - self.entropy_weight * entropy
             #############################
 
             # critic_loss
             ############TODO#############
             # critic_loss = ?
-
+            value = self.critic(state).squeeze()
+            critic_loss = F.mse_loss(value, return_)
             #############################
             
             # train critic
@@ -270,14 +303,21 @@ class PPOAgent:
         """Train the PPO agent."""
         self.is_test = False
 
-        state, _ = self.env.reset(seed=self.seed)
+        state, _ = self.env.reset()
         state = np.expand_dims(state, axis=0)
 
         actor_losses, critic_losses = [], []
         scores = []
+        eval_scores = []
+        best_eval_score = -np.inf
         score = 0
         episode_count = 0
-        for ep in tqdm(range(1, self.num_episodes)):
+        step_count = 0
+        os.makedirs("v3", exist_ok=True)
+        #  1M, 1.5M, 2M, 2.5M, and 3M
+        snapshots_step = [(3000000, '3m'), (2500000, '2.5m'), (2000000, '2m'), (1500000, '1.5m'), (1000000, '1m'), (500000, '0.5m'), (100000, '0.1m')]
+        tq = tqdm(range(1, self.num_episodes))
+        for ep in tq:
             score = 0
             print("\n")
             for _ in range(self.rollout_len):
@@ -285,34 +325,52 @@ class PPOAgent:
                 action = self.select_action(state)
                 action = action.reshape(self.action_dim,)
                 next_state, reward, done = self.step(action)
-
+                step_count += 1
                 state = next_state
                 score += reward[0][0]
-
+                wandb.log({"step": step_count})
                 # if episode ends
                 if done[0][0]:
                     episode_count += 1
-                    state, _ = self.env.reset(seed=self.seed)
+                    state, _ = self.env.reset()
                     state = np.expand_dims(state, axis=0)
                     scores.append(score)
-                    print(f"Episode {episode_count}: Total Reward = {score}")
+                    wandb.log({"episode": episode_count, "return": score})
+                    # print(f"Episode {episode_count}: Total Reward = {score}")
+
                     score = 0
 
             actor_loss, critic_loss = self.update_model(next_state)
             actor_losses.append(actor_loss)
             critic_losses.append(critic_loss)
+            
+            eval_score = self.test()
+            eval_scores.append(eval_score)
+            avg_eval_score = np.mean(eval_scores[-20:])
+            tq.set_description(f"Score = {eval_score:.2f}, Avg Score = {avg_eval_score:.2f}")
+            best_eval_score = max(best_eval_score, avg_eval_score)
+            wandb.log({"avg_score": avg_eval_score})  
+            wandb.log({"best_avg_score": best_eval_score})
+            if step_count > snapshots_step[-1][0]:
+                # save the model
+                model_name = f"LAB7_StudentID_task3_ppo_{snapshots_step[-1][1]}.pt"
+                self.save_model(os.path.join("v3", model_name))
+        torch.save({'actor': self.actor.state_dict(),'critic': self.critic.state_dict()}, "v3_final.pt")
+        self.test(video_folder="video")
+        self.env.close()
 
         # termination
         self.env.close()
 
-    def test(self, video_folder: str):
+    def test(self, video_folder = None):
         """Test the agent."""
         self.is_test = True
 
         tmp_env = self.env
-        self.env = gym.wrappers.RecordVideo(self.env, video_folder=video_folder)
+        if video_folder:
+            self.env = gym.wrappers.RecordVideo(self.env, video_folder=video_folder)
 
-        state, _ = self.env.reset(seed=self.seed)
+        state, _ = self.env.reset()
         done = False
         score = 0
 
@@ -327,6 +385,13 @@ class PPOAgent:
         self.env.close()
 
         self.env = tmp_env
+    def save_model(self, path: str):
+        """Save the model."""
+        state_dict = {
+            "actor": self.actor.state_dict(),
+            "critic": self.critic.state_dict(),
+        }
+        torch.save(state_dict, path)
  
 def seed_torch(seed):
     torch.manual_seed(seed)
@@ -341,7 +406,7 @@ if __name__ == "__main__":
     parser.add_argument("--critic-lr", type=float, default=3e-4)
     parser.add_argument("--discount-factor", type=float, default=0.99)
     parser.add_argument("--num-episodes", type=float, default=1000)
-    parser.add_argument("--seed", type=int, default=77)
+    # parser.add_argument("--seed", type=int, default=77)
     parser.add_argument("--entropy-weight", type=int, default=1e-2) # entropy can be disabled by setting this to 0
     parser.add_argument("--tau", type=float, default=0.95)
     parser.add_argument("--batch-size", type=int, default=64)
@@ -352,10 +417,10 @@ if __name__ == "__main__":
  
     # environment
     env = gym.make("Walker2d-v4", render_mode="rgb_array")
-    seed = 77
-    random.seed(seed)
-    np.random.seed(seed)
-    seed_torch(seed)
+    # seed = 77
+    # random.seed(seed)
+    # np.random.seed(seed)
+    # seed_torch(seed)
     wandb.init(project="DLP-Lab7-PPO-Walker", name=args.wandb_run_name, save_code=True)
     
     agent = PPOAgent(env, args)
