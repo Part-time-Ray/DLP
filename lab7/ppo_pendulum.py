@@ -102,14 +102,24 @@ def compute_gae(
     """Compute gae."""
 
     ############TODO#############
-    gae_returns = list()
-    values.append(next_value)
-    sum = 0
-    for i in range(len(rewards)-1, -1, -1):
-        td_error = rewards[i] + gamma * values[i+1] * masks[i] - values[i]
-        sum = sum * (gamma * tau) * masks[i] + td_error
-        gae_returns.append(sum)
-    gae_returns.reverse()
+    # gae_returns = list()
+    # values.append(next_value)
+    # sum = 0
+    # for i in range(len(rewards)-1, -1, -1):
+    #     td_error = rewards[i] + gamma * values[i+1] * masks[i] - values[i]
+    #     sum = sum * (gamma * tau) * masks[i] + td_error
+    #     gae_returns.append(sum + values[i])
+    # gae_returns.reverse()
+    values = values + [next_value]
+    gae = 0
+    returns: Deque[float] = deque()
+
+    for step in reversed(range(len(rewards))):
+        delta = rewards[step] + gamma * values[step + 1] * masks[step] - values[step]
+        gae = delta + gamma * tau * masks[step] * gae
+        returns.appendleft(gae + values[step])
+
+    return list(returns)
     #############################
     return gae_returns
 
@@ -154,9 +164,11 @@ class PPOAgent:
         seed (int): random seed
     """
 
-    def __init__(self, env: gym.Env, args):
+    def __init__(self, env: gym.Env, random_seed, args):
         """Initialize."""
         self.env = env
+        self.args = args
+        self.random_seed = random_seed
         self.gamma = args.discount_factor
         self.tau = args.tau
         self.batch_size = args.batch_size
@@ -167,14 +179,14 @@ class PPOAgent:
         self.update_epoch = args.update_epoch
         
         # device: cpu / gpu
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device("cuda:" + args.gpu if torch.cuda.is_available() else "cpu")
         print(self.device)
 
         # networks
-        obs_dim = env.observation_space.shape[0]
-        action_dim = env.action_space.shape[0]
-        self.actor = Actor(obs_dim, action_dim).to(self.device)
-        self.critic = Critic(obs_dim).to(self.device)
+        self.obs_dim = env.observation_space.shape[0]
+        self.action_dim = env.action_space.shape[0]
+        self.actor = Actor(self.obs_dim, self.action_dim).to(self.device)
+        self.critic = Critic(self.obs_dim).to(self.device)
 
         # optimizer
         self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=0.001)
@@ -196,7 +208,7 @@ class PPOAgent:
 
     def select_action(self, state: np.ndarray) -> np.ndarray:
         """Select an action from the input state."""
-        state = torch.FloatTensor(state).to(self.device)
+        state = torch.FloatTensor(state).to(self.device).unsqueeze(0)
         action, dist = self.actor(state)
         selected_action = dist.mean if self.is_test else action
 
@@ -211,6 +223,7 @@ class PPOAgent:
 
     def step(self, action: np.ndarray) -> Tuple[np.ndarray, np.float64, bool]:
         """Take an action and return the response of the env."""
+        action = action.flatten()
         next_state, reward, terminated, truncated, _ = self.env.step(action)
         done = terminated or truncated
         next_state = np.reshape(next_state, (1, -1)).astype(np.float64)
@@ -243,6 +256,7 @@ class PPOAgent:
         values = torch.cat(self.values).detach()
         log_probs = torch.cat(self.log_probs).detach()
         advantages = returns - values
+        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
         actor_losses, critic_losses = [], []
 
@@ -274,7 +288,7 @@ class PPOAgent:
             # critic_loss
             ############TODO#############
             # critic_loss = ?
-            value = self.critic(state).squeeze()
+            value = self.critic(state)
             critic_loss = F.mse_loss(value, return_)
             #############################
             
@@ -303,8 +317,8 @@ class PPOAgent:
         """Train the PPO agent."""
         self.is_test = False
 
-        state, _ = self.env.reset()
-        state = np.expand_dims(state, axis=0)
+        state, _ = self.env.reset(seed=random.sample(self.random_seed, 1)[0])
+        # state = np.expand_dims(state, axis=0)
 
         actor_losses, critic_losses = [], []
         scores = []
@@ -313,25 +327,24 @@ class PPOAgent:
         score = 0
         episode_count = 0
         step_count = 0
-        os.makedirs("v1", exist_ok=True)
+        os.makedirs("v2", exist_ok=True)
         best_model_path = os.path.join("v2", f"LAB7_313551176_task2_ppo_pendulum.pt")
         tq = tqdm(range(1, self.num_episodes))
         for ep in tq:
             score = 0
-            print("\n")
             for _ in range(self.rollout_len):
                 self.total_step += 1
                 action = self.select_action(state)
                 next_state, reward, done = self.step(action)
                 step_count += 1
-                state = next_state
+                state = next_state.squeeze(0)
                 score += reward[0][0]
                 wandb.log({"step": step_count})
                 # if episode ends
                 if done[0][0]:
                     episode_count += 1
-                    state, _ = self.env.reset()
-                    state = np.expand_dims(state, axis=0)
+                    state, _ = self.env.reset(seed=random.sample(self.random_seed, 1)[0])
+                    # state = np.expand_dims(state, axis=0)
                     scores.append(score)
                     wandb.log({"episode": episode_count, "return": score})
                     # print(f"Episode {episode_count}: Total Reward = {score}")
@@ -357,12 +370,51 @@ class PPOAgent:
             wandb.log({"avg_score": avg_eval_score})  
             wandb.log({"best_avg_score": best_eval_score})
         torch.save({'actor': self.actor.state_dict(),'critic': self.critic.state_dict()}, "v2_final.pt")
-        self.test(video_folder="video")
+        self.test(video_folder="video_2")
         self.env.close()
 
         # termination
         self.env.close()
 
+    def load_model(self):
+        state_dict = torch.load(self.args.model_path)
+        self.actor.load_state_dict(state_dict["actor"])
+        self.critic.load_state_dict(state_dict["critic"])
+        self.actor.eval()
+        self.critic.eval()
+    
+    def gen_video(self, video_folder: str):
+        """Generate videos for each seed using the trained model."""
+        os.makedirs(video_folder, exist_ok=True)
+        [os.remove(os.path.join(video_folder, f)) for f in os.listdir(video_folder) if os.path.isfile(os.path.join(video_folder, f))]
+        try:
+            self.load_model()
+        except Exception as e:
+            print(f"Failed to load model from {self.args.model_path}: {e}")
+            return None
+
+        self.is_test = True
+        scores = []
+
+        for seed in self.random_seed:
+            self.env = gym.make("Pendulum-v1", render_mode="rgb_array")
+            self.env = gym.wrappers.RecordVideo(self.env, video_folder=video_folder, name_prefix=f"pendulum-seed-{seed}")
+            state, _ = self.env.reset(seed=seed)
+            done = False
+            score = 0
+            with torch.no_grad():
+                while not done:
+                    action = self.select_action(state)
+                    next_state, reward, done = self.step(action)
+                    state = next_state
+                    score += float(reward[0][0])
+            scores.append(score)
+            print(f"seed: {seed}, score: {score}")
+            self.env.close()
+
+        avg_score = np.mean(scores)
+        print("Average score: ", avg_score)
+        return avg_score
     def test(self, video_folder = None):
         """Test the agent."""
         self.is_test = True
@@ -371,7 +423,7 @@ class PPOAgent:
         if video_folder:
             self.env = gym.wrappers.RecordVideo(self.env, video_folder=video_folder)
 
-        state, _ = self.env.reset()
+        state, _ = self.env.reset(seed=random.sample(self.random_seed, 1)[0])
         done = False
         score = 0
 
@@ -380,9 +432,9 @@ class PPOAgent:
             next_state, reward, done = self.step(action)
 
             state = next_state
-            score += reward
+            score += reward[0][0]
 
-        print("score: ", score)
+        # print("score: ", score)
         self.env.close()
 
         self.env = tmp_env
@@ -398,21 +450,32 @@ def seed_torch(seed):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--wandb-run-name", type=str, default="pendulum-ppo-run")
+    parser.add_argument("--gpu", "-g", type=str, default="0")
     parser.add_argument("--actor-lr", type=float, default=1e-4)
     parser.add_argument("--critic-lr", type=float, default=1e-3)
     parser.add_argument("--discount-factor", type=float, default=0.9)
     parser.add_argument("--num-episodes", type=float, default=1000)
-    parser.add_argument("--entropy-weight", type=int, default=1e-2) # entropy can be disabled by setting this to 0
+    parser.add_argument("--entropy-weight", type=float, default=1e-2) # entropy can be disabled by setting this to 0
     parser.add_argument("--tau", type=float, default=0.8)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--epsilon", type=int, default=0.2)
     parser.add_argument("--rollout-len", type=int, default=2000)  
-    parser.add_argument("--update-epoch", type=float, default=64)
+    parser.add_argument("--update-epoch", type=int, default=64)
+    parser.add_argument("--model-path", "-p", type=str, default="")
     args = parser.parse_args()
  
     # environment
     env = gym.make("Pendulum-v1", render_mode="rgb_array")
-    wandb.init(project="DLP-Lab7-PPO-Pendulum", name=args.wandb_run_name, save_code=True)
+    seed = 77
+    random.seed(seed)
+    np.random.seed(seed)
+    seed_torch(seed)
+    random_seed = random.sample(range(0, 10000), 20)
+    print("Random Seed: ", random_seed)
     
-    agent = PPOAgent(env, args)
-    agent.train()
+    agent = PPOAgent(env, random_seed, args)
+    if len(args.model_path):
+        agent.gen_video(video_folder="video_2")
+    else:
+        wandb.init(project="DLP-Lab7-PPO-Pendulum", name=args.wandb_run_name, save_code=True)
+        agent.train()
