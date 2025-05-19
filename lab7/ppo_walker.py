@@ -379,7 +379,8 @@ class PPOAgent:
                 snapshots_step.pop()
                 if len(snapshots_step) == 0:
                     break
-        torch.save({'actor': self.actor.state_dict(),'critic': self.critic.state_dict()}, "v3_final.pt")
+        # torch.save({'actor': self.actor.state_dict(),'critic': self.critic.state_dict()}, "v3_final.pt")
+        self.save_model("v3_final.pt")
 
         # termination
         self.env.close()
@@ -475,7 +476,7 @@ if __name__ == "__main__":
     parser.add_argument("--entropy-weight", type=float, default=1e-2) # entropy can be disabled by setting this to 0
     parser.add_argument("--tau", type=float, default=0.95)
     parser.add_argument("--batch-size", type=int, default=64)
-    parser.add_argument("--epsilon", type=int, default=0.2)
+    parser.add_argument("--epsilon", type=int, default=0.3)
     parser.add_argument("--rollout-len", type=int, default=8192)  
     parser.add_argument("--update-epoch", "-u", type=int, default=20)
     parser.add_argument("--model-path", "-p", type=str, default="")
