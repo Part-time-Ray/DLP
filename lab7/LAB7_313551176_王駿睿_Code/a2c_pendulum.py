@@ -136,6 +136,7 @@ class A2CAgent:
 
         # total steps count
         self.total_step = 0
+        self.test_episode = 0
 
         # mode: train / test
         self.is_test = False
@@ -207,14 +208,12 @@ class A2CAgent:
         self.is_test = False
         step_count = 0
         best_score = -np.inf
-        total_score = []
         os.makedirs("v1", exist_ok=True)
         best_model_path = os.path.join("v1", f"LAB7_313551176_task1_a2c_pendulum.pt")
         tq = tqdm(range(1, self.num_episodes))
         for ep in tq: 
             actor_losses, critic_losses, scores = [], [], []
-            seed = random.sample(self.random_seed, 1)[0]
-            state, _ = self.env.reset(seed=seed)
+            state, _ = self.env.reset(seed=random.sample(self.random_seed, 1)[0])
             score = 0
             done = False
             self.transition = []
@@ -243,11 +242,9 @@ class A2CAgent:
                     wandb.log({
                         "episode": ep,
                         "return": score,
-                        })  
-            eval_score = self.test()
-            total_score.append(eval_score)
-            avg_score = np.mean(total_score[-20:])
-            tq.set_description(f"Score = {eval_score:.2f}, Avg Score = {avg_score:.2f}")
+                        }) 
+            avg_score = self.test()
+            tq.set_description(f"Avg Score = {avg_score:.2f}")
             if avg_score > best_score:
                 best_score = avg_score
                 self.save_model(best_model_path)
@@ -308,26 +305,27 @@ class A2CAgent:
         tmp_env = self.env
         if video_folder:
             self.env = gym.wrappers.RecordVideo(self.env, video_folder=video_folder)
+        total_score = 0
+        for seed in self.random_seed:
+            state, _ = self.env.reset(seed=seed)
+            done = False
+            score = 0
+            with torch.no_grad():
+                while not done:
+                    action = self.select_action(state)
+                    assert action.shape == (1,) and action[0] <= 2.0 and action[0] >= -2.0
+                    next_state, reward, done = self.step(action)
 
-        state, _ = self.env.reset(seed=random.sample(self.random_seed, 1)[0])
-        done = False
-        score = 0
-        with torch.no_grad():
-            while not done:
-                action = self.select_action(state)
-                assert action.shape == (1,) and action[0] <= 2.0 and action[0] >= -2.0
-                next_state, reward, done = self.step(action)
-
-                state = next_state
-                score += reward
-
-
+                    state = next_state
+                    score += reward
+            total_score += score
+        avg_score = total_score / len(self.random_seed)
         # print("score: ", score)
         self.env.close()
 
         self.env = tmp_env
         self.is_test = False
-        return score
+        return avg_score
     
     def save_model(self, path: str):
         """Save the model."""
